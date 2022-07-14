@@ -114,6 +114,41 @@ defmodule OpentelemetryObanTest do
     assert send_trace_id != process_trace_id
   end
 
+  test "tracing information is propagated between send and process, using child spans" do
+    OpenTelemetry.Tracer.with_span "test span" do
+      ctx = OpenTelemetry.Tracer.current_span_ctx()
+      root_trace_id = OpenTelemetry.Span.trace_id(ctx)
+      root_span_id = OpenTelemetry.Span.span_id(ctx)
+
+      OpentelemetryOban.insert_child(TestJob.new(%{}))
+      assert %{success: 1, failure: 0} = Oban.drain_queue(queue: :events)
+
+      assert_receive {:span,
+                      span(
+                        name: "TestJob send",
+                        attributes: _attributes,
+                        trace_id: ^root_trace_id,
+                        span_id: send_span_id,
+                        parent_span_id: ^root_span_id,
+                        kind: :producer,
+                        status: :undefined
+                      )}
+
+      assert_receive {:span,
+                      span(
+                        name: "TestJob process",
+                        attributes: _attributes,
+                        kind: :consumer,
+                        status: :undefined,
+                        trace_id: ^root_trace_id,
+                        parent_span_id: ^send_span_id,
+                        links: links
+                      )}
+
+      assert [] = :otel_links.list(links)
+    end
+  end
+
   test "no link is created on process when tracing info was not propagated" do
     # Using regular Oban, instead of OpentelemetryOban
     Oban.insert(TestJob.new(%{}))

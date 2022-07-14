@@ -49,6 +49,11 @@ defmodule OpentelemetryOban do
     :ok
   end
 
+  def insert_child(name \\ Oban, %Changeset{} = changeset) do
+    changeset_with_relation = add_child_tracing_relation_to_meta(changeset)
+    insert(name, changeset_with_relation)
+  end
+
   def insert(name \\ Oban, %Changeset{} = changeset) do
     attributes = attributes_before_insert(changeset)
     worker = Changeset.get_field(changeset, :worker, "unknown")
@@ -110,6 +115,12 @@ defmodule OpentelemetryOban do
 
   def insert_all(name \\ __MODULE__, multi, multi_name, changesets_or_wrapper) do
     Oban.insert_all(name, multi, multi_name, changesets_or_wrapper)
+  end
+
+  defp add_child_tracing_relation_to_meta(changeset) do
+    meta = Changeset.get_field(changeset, :meta, %{})
+
+    Changeset.change(changeset, %{meta: Map.put(meta, "__otel_relation__", "child")})
   end
 
   defp add_tracing_information_to_meta(changeset) do
