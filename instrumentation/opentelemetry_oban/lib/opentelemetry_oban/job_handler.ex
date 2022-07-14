@@ -37,6 +37,50 @@ defmodule OpentelemetryOban.JobHandler do
   end
 
   def handle_job_start(_event, _measurements, metadata, _config) do
+    emit_start_span(metadata, metadata.job.meta["__otel_relation__"])
+  end
+
+  defp emit_start_span(metadata, "child") do
+    %{
+      job: %{
+        id: id,
+        queue: queue,
+        worker: worker,
+        priority: priority,
+        inserted_at: inserted_at,
+        scheduled_at: scheduled_at,
+        attempt: attempt,
+        max_attempts: max_attempts,
+        meta: job_meta
+      }
+    } = metadata
+
+    :otel_propagator_text_map.extract(Map.to_list(job_meta))
+
+    attributes = %{
+      "messaging.system": :oban,
+      "messaging.destination": queue,
+      "messaging.destination_kind": :queue,
+      "messaging.operation": :process,
+      "messaging.oban.job_id": id,
+      "messaging.oban.worker": worker,
+      "messaging.oban.priority": priority,
+      "messaging.oban.attempt": attempt,
+      "messaging.oban.max_attempts": max_attempts,
+      "messaging.oban.inserted_at":
+        if(inserted_at, do: DateTime.to_iso8601(inserted_at), else: nil),
+      "messaging.oban.scheduled_at": DateTime.to_iso8601(scheduled_at)
+    }
+
+    span_name = "#{worker} process"
+
+    OpentelemetryTelemetry.start_telemetry_span(@tracer_id, span_name, metadata, %{
+      kind: :consumer,
+      attributes: attributes
+    })
+  end
+
+  defp emit_start_span(metadata, _relation) do
     %{
       job: %{
         id: id,
